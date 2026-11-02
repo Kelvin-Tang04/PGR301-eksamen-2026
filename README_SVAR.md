@@ -17,3 +17,10 @@ docker run -p 9999:8080 \
 ```
 
 Test: `curl http://localhost:9999/api/health`
+
+## Oppgave 1B — CI-pipeline
+
+Workflow: `.github/workflows/deploy.yml`
+Url for kjøring: https://github.com/Kelvin-Tang04/PGR301-eksamen-2026/actions/runs/41489052079
+
+**Tagging-strategi:** Imaget tagges med commit-SHA (`github.sha`). Hver tag er dermed unik og kan spores direkte tilbake til commiten den er bygget fra, slik at man alltid vet hvilken kode som kjører hvor. Det gjør også rollback enkelt, fordi man kan deploye et tidligere image ved å angi en eldre SHA. `latest` brukes ikke, fordi den alltid peker på siste push og ikke sier noe om hvilken versjon som faktisk kjører. 
