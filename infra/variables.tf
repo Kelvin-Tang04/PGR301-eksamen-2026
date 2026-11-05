@@ -12,3 +12,8 @@ variable "image_tag" {
   type        = string
   description = "Image tag in ECR (commit SHA) that the service should run"
 }
+
+variable "metric_namespace" {
+  type    = string
+  default = "wishifai-6-l"
+}
