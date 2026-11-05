@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import io.micrometer.core.annotation.Timed;
 
 import java.util.UUID;
 
@@ -19,6 +20,7 @@ public class S3Service {
         this.bucket = bucket;
     }
 
+    @Timed("s3.upload")
     public String upload(byte[] bytes, String originalName, String contentType) {
         String key = "uploads/" + UUID.randomUUID() + "-" + (originalName == null ? "image" : originalName);
         s3.putObject(

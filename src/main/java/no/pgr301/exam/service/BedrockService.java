@@ -11,6 +11,7 @@ import software.amazon.awssdk.services.bedrockruntime.model.ConversationRole;
 import software.amazon.awssdk.services.bedrockruntime.model.ConverseRequest;
 import software.amazon.awssdk.services.bedrockruntime.model.ConverseResponse;
 import software.amazon.awssdk.services.bedrockruntime.model.Message;
+import io.micrometer.core.annotation.Timed;
 
 import java.util.List;
 import java.util.regex.Matcher;
@@ -37,6 +38,7 @@ public class BedrockService {
      * @param labels
      * @return
      */
+    @Timed("bedrock.suggest_gifts")
     public GiftAnalysis suggestGifts(List<String> labels) {
         String prompt = """
                 Du er en gaveassistent. Du får en liste med objekter som Rekognition
