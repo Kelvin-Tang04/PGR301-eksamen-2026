@@ -17,3 +17,12 @@ variable "metric_namespace" {
   type    = string
   default = "wishifai-6-l"
 }
+
+variable "alarm_email" {
+  type = string
+}
+
+variable "bedrock_latency_threshold_ms" {
+  type    = number
+  default = 20000
+}

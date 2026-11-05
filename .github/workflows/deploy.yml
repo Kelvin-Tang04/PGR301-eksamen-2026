@@ -67,4 +67,4 @@ jobs:
 
       - name: terraform apply
         working-directory: infra
-        run: terraform apply -auto-approve -input=false -var "image_tag=${{ github.sha }}"
+        run: terraform apply -auto-approve -input=false -var "image_tag=${{ github.sha }}" -var "alarm_email=${{ secrets.ALARM_EMAIL }}"
