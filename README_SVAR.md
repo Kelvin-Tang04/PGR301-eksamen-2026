@@ -21,31 +21,25 @@ Test: `curl http://localhost:9999/api/health`
 ## Oppgave 1B — CI-pipeline
 
 Workflow: `.github/workflows/deploy.yml`
-Url for kjøring: https://github.com/Kelvin-Tang04/PGR301-eksamen-2026/actions/runs/41489052079
+Url: https://github.com/Kelvin-Tang04/PGR301-eksamen-2026/actions/runs/41489052079
 
-**Tagging-strategi:** Imaget tagges med commit-SHA (`github.sha`). Hver tag er dermed unik og kan spores direkte tilbake til commiten den er bygget fra, slik at man alltid vet hvilken kode som kjører hvor. Det gjør også rollback enkelt, fordi man kan deploye et tidligere image ved å angi en eldre SHA. `latest` brukes ikke, fordi den alltid peker på siste push og ikke sier noe om hvilken versjon som faktisk kjører. 
+**Tagging-strategi:** Imaget tagges med commit-SHA (`github.sha`). Hver tag kan dermed spores tilbake til commiten den er bygget fra, og det er enkelt å rulle tilbake ved å deploye en eldre SHA. `latest` alene sier ikke hvilken versjon som faktisk kjører.
 
 ## Oppgave 2A — Infrastruktur for tjenesten
 
-Terraform-koden ligger i `infra/` og oppretter en ECS Express-tjeneste, en S3-bucket for bilder og en task-rolle for applikasjonen.
+Terraform-koden i `infra/` oppretter en ECS Express-tjeneste, en S3-bucket for bilder og task-rollen `wishifai-task-role-6` med tilgang til S3, Rekognition, Bedrock og CloudWatch. `S3_BUCKET` settes automatisk fra bucketen Terraform oppretter.
 
-Offentlig URL: https://wi-37426755399142ab86e99763799ac9cf.ecs.eu-west-1.on.aws
-
-**ECS Express:** Express oppretter load balancer, nettverk og auto-scaling automatisk, slik at tjenesten får et offentlig endepunkt uten manuelt oppsett av infrastruktur.
-
-**Roller:** Tjenesten bruker de eksisterende execution- og infrastructure-rollene. Task-rollen `wishifai-task-role-6` opprettes i Terraform og gir applikasjonen kun tilgangene den trenger: `s3:PutObject` på egen bucket, `rekognition:DetectLabels`, `bedrock:InvokeModel` og `cloudwatch:PutMetricData`.
-
-**Konfigurasjon:** `S3_BUCKET` settes automatisk til bucketen Terraform oppretter. Region, kandidatnummer og image-tag er variabler, og URL-en eksponeres som output. Health check peker på `/api/health`, siden applikasjonen ikke svarer på `/`.
+Offentlig URL: https://wi-37426755399142ab86e99763799ac9cf.ecs.eu-west-1.on.aws (test med `/api/health`)
 
 ## Oppgave 2B — Remote state
 
-Terraform-state lagres i den delte S3-bucketen `pgr301-terraform-state` med nøkkelen `wishifai/6/terraform.tfstate`. Kandidatnummeret i nøkkelen gjør state-filen unik, slik at den ikke kolliderer med andre kandidater. `use_lockfile` låser state under kjøring, slik at to samtidige kjøringer ikke overskriver hverandre.
+State lagres i `pgr301-terraform-state` med nøkkelen `wishifai/6/terraform.tfstate`. Kandidatnummeret i nøkkelen gjør den unik.
 
 ## Oppgave 2C — Terraform i pipeline
 
 Workflowen har to jobber: `build-push` bygger og pusher imaget til ECR, og `deploy` kjører `terraform fmt -check`, `init` og `apply` mot `infra/`. `deploy` er avhengig av `build-push` via `needs:`.
 
-Grønn kjøring: https://github.com/Kelvin-Tang04/PGR301-eksamen-2026/actions/runs/41667324023
+Url: https://github.com/Kelvin-Tang04/PGR301-eksamen-2026/actions/runs/41667324023
 
 **Hvorfor Terraform kjører etter container-build:** Terraform deployer tjenesten med image-taggen fra samme commit. Kjørte Terraform før eller parallelt med bygget, kunne ECS forsøke å starte et image som ennå ikke finnes i ECR, og deployen ville feilet. Med `needs:` blir Terraform bare kjørt hvis bygget og pushen lyktes.
 
@@ -67,18 +61,40 @@ Metrikkene publiseres til CloudWatch i namespacet `wishifai-6-l`.
 ![CloudWatch-dashboard, business-metrikker](img/dashboard1.png)
 ![CloudWatch-dashboard, applikasjon og infrastruktur](img/dashboard2.png)
 
-**Begrunnelse for metrikkene:**
-- **Business:** Antall analyserte bilder og gaveforslag per analyse viser bruken av tjenesten og hva brukeren får ut av den.
-- **Applikasjon:** Tidsbruk for Bedrock, Rekognition og S3 viser hvilket steg som påvirker svartiden mest. HTTP-latens og JVM-heap fra Spring Boot Actuator viser svartiden brukeren opplever og minnebruken i applikasjonen.
-- **Infrastruktur:** CPU- og minneutnyttelse for ECS-tjenesten viser om containeren er tilstrekkelig dimensjonert.
+**Metrikkene:**
+- **Business:** bilder analysert og gaveforslag per analyse viser bruken og hva brukeren får ut av tjenesten.
+- **Applikasjon:** tid per kall viser hvilket steg som er tregest. HTTP-latens og JVM-heap viser svartid og minnebruk.
+- **Infrastruktur:** ECS CPU og minne viser om containeren har nok ressurser.
 
-**Hvor blir tiden av:**
-- Bedrock-kallet tar om lag 16 sekunder, mens Rekognition og S3 tar under 0,1 sekund hver.
-- Den totale svartiden for `/api/analyze` er om lag 17 sekunder, så Bedrock står for over 90 % av den.
-- CPU-bruken når bare om lag 27 % under analyse, minnebruken ligger stabilt rundt 14 %, og JVM-heap viser normal søppeltømming. Containeren er dermed ikke flaskehalsen.
-- Konklusjon: tjenesten er treg på grunn av Bedrock-kallet, ikke infrastrukturen. Å skalere containeren vil ikke hjelpe. Forbedringer må rettes mot Bedrock, for eksempel en kortere prompt, en raskere modell eller strømming av svaret.
+**Hvor blir tiden av:** Bedrock tar ca. 16 av totalt ca. 17 sekunder, mens Rekognition og S3 tar under 0,1 sekund. CPU og minne er lavt, så flaskehalsen er Bedrock og ikke infrastrukturen.
 
-**Begrunnelse for alarmen:**
-- **Hva:** `wishifai-6-l-bedrock-latency` varsler på e-post via SNS når det tregeste Bedrock-kallet innenfor ett minutt overstiger 20 sekunder.
-- **Hvorfor:** Bedrock står for over 90 % av den totale svartiden og har derfor størst innvirkning på brukeropplevelsen.
-- **Terskel:** Normal tidsbruk er om lag 16 sekunder. Terskelen på 20 sekunder gir margin mot naturlig variasjon, slik at alarmen kun utløses ved en reell forverring.
+**Alarm:** `wishifai-6-l-bedrock-latency` sender e-post via SNS når Bedrock-kallet tar over 20 sekunder. Bedrock står for over 90 % av svartiden, og normal tid er ca. 16 sekunder, så 20 sekunder fanger en reell forverring uten å reagere på vanlig variasjon.
+
+## Oppgave 4 — Drøfteoppgave
+
+Bruk av generativ kunstig intelligens (AI) stiller andre krav til DevOps enn tradisjonell programvareutvikling. Språkmodeller kan gi ulike svar på samme forespørsel, og selv om en applikasjon fungerer teknisk, er det ingen garanti for at innholdet er relevant eller trygt. Testing, kontinuerlig leveranse og overvåking må derfor tilpasses både teknologien og konsekvensene eventuelle feil kan få.
+
+**Testing**
+
+Tradisjonell programvaretesting undersøker gjerne om en bestemt input gir et forventet resultat. Dette er mer utfordrende med generativ AI, ettersom flere ulike svar kan være akseptable. I min Wishifai-løsning inneholder pipelinen ingen automatiserte tester av gaveforslagene. Den benytter blant annet terraform fmt -check, som kontrollerer formateringen av Terraform-koden, men ikke kvaliteten på anbefalingene.
+
+Jeg mener derfor at testingen bør utvides med representative forespørsler som undersøker om forslagene er relevante, trygge og tilpasset mottakeren. Resultatene kan vurderes opp mot forhåndsdefinerte kriterier. For applikasjoner som gir medisinske eller juridiske råd, bør testingen være mer omfattende og inkludere vurderinger fra fagpersoner før produksjonssetting.
+
+**Kontinuerlig leveranse**
+
+I Wishifai benyttes SHA-tagging for å identifisere hvilken kodeversjon som kjører. Prompten er imidlertid hardkodet i BedrockService.java, mens modell-ID-en angis gjennom en miljøvariabel. En endring av modellversjonen kan dermed påvirke anbefalingene uten at SHA-taggen endres.
+
+Etter min vurdering bør både prompt og modellversjon dokumenteres og versjoneres. Endringer bør testes før utrulling, slik at eventuelle kvalitetsproblemer kan oppdages tidlig. Det bør også være mulig å gå tilbake til en tidligere versjon dersom endringene gir dårligere resultater. I applikasjoner med høy risiko bør større endringer kreve manuell godkjenning.
+
+**Overvåking**
+
+Overvåkingen i Wishifai viser hvorfor tekniske målinger alene ikke er tilstrekkelige. CloudWatch-alarmen fra oppgave 3B varsler dersom Bedrock bruker for lang tid på å svare, men oppdager ikke upassende anbefalinger. Et raskt svar med et farlig gaveforslag til et barnerom vil derfor ikke utløse alarmen.
+
+Metrikken wishlist.suggestions fra oppgave 3A registrerer antall forslag, men sier ingenting om kvaliteten. Dashboardet kan dermed vise fem forslag selv om innholdet er lite relevant. Jeg mener derfor at overvåkingen bør suppleres med brukertilbakemeldinger og regelmessige kvalitetskontroller.
+
+**Risiko og ansvar**
+
+I min løsning sendes anbefalingene fra Bedrock direkte til brukeren uten filtrering eller guardrails. Selv om konsekvensene av feilaktige gaveforslag vanligvis er begrensede, kan tilsvarende feil innen juridisk eller økonomisk rådgivning få alvorlige følger.
+
+Jeg mener derfor at kontrolltiltakene må tilpasses risikoen. I en gaveapplikasjon kan mindre relevante forslag håndteres gjennom tilbakemeldinger og forbedringer etter lansering. I løsninger med høy risiko bør potensielt skadelige svar derimot avdekkes gjennom grundig testing og menneskelig kontroll før produksjonssetting. Ansvarlig bruk av generativ AI forutsetter dermed at DevOps-praksisene ivaretar både teknisk stabilitet og kvaliteten på innholdet.
+
